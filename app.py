@@ -21,7 +21,6 @@ def parse_preferences(text, agents, choices):
                 if x in choices and x not in acceptable:
                     acceptable.append(x)
 
-            # If agent never put itself in the list, missing choices are acceptable by default
             if agent not in ranking:
                 missing = [x for x in choices if x not in acceptable]
                 acceptable = acceptable + missing
@@ -79,20 +78,53 @@ def make_market(num_doctors, num_hospitals, capacity_text, doctor_pref_text, hos
     return doctors, hospitals, doctor_prefs, hospital_prefs, capacities
 
 
-def initialize_state(doctors, hospitals):
+def initialize_state(doctors, hospitals, algorithm):
+    if algorithm == "doctor":
+        proposers = doctors.copy()
+        receivers = hospitals.copy()
+        proposer_caps = {d: 1 for d in doctors}
+        receiver_caps = {h: None for h in hospitals}
+    else:
+        proposers = hospitals.copy()
+        receivers = doctors.copy()
+        proposer_caps = {h: None for h in hospitals}
+        receiver_caps = {d: 1 for d in doctors}
+
     return {
         "round": 0,
-        "unmatched": doctors.copy(),
-        "next_choice_index": {d: 0 for d in doctors},
-        "held": {h: [] for h in hospitals},
+        "active": proposers.copy(),
+        "next_choice_index": {p: 0 for p in proposers},
+        "held_by_receiver": {r: [] for r in receivers},
         "log": [],
         "done": False,
         "last_step": "Click Next Round to begin.",
+        "algorithm": algorithm,
     }
 
 
-def hospital_rank(hospital, doctor, hospital_prefs):
-    return hospital_prefs[hospital].index(doctor)
+def get_market_for_algorithm(doctors, hospitals, doctor_prefs, hospital_prefs, capacities, algorithm):
+    if algorithm == "doctor":
+        proposers = doctors
+        receivers = hospitals
+        proposer_prefs = doctor_prefs
+        receiver_prefs = hospital_prefs
+        receiver_caps = capacities
+        proposer_label = "Doctor"
+        receiver_label = "Hospital"
+    else:
+        proposers = hospitals
+        receivers = doctors
+        proposer_prefs = hospital_prefs
+        receiver_prefs = doctor_prefs
+        receiver_caps = {d: 1 for d in doctors}
+        proposer_label = "Hospital"
+        receiver_label = "Doctor"
+
+    return proposers, receivers, proposer_prefs, receiver_prefs, receiver_caps, proposer_label, receiver_label
+
+
+def receiver_rank(receiver, proposer, receiver_prefs):
+    return receiver_prefs[receiver].index(proposer)
 
 
 def run_one_round(s, doctors, hospitals, doctor_prefs, hospital_prefs, capacities):
@@ -100,61 +132,78 @@ def run_one_round(s, doctors, hospitals, doctor_prefs, hospital_prefs, capacitie
         s["last_step"] = "Algorithm already complete."
         return s
 
+    algorithm = s["algorithm"]
+
+    (
+        proposers,
+        receivers,
+        proposer_prefs,
+        receiver_prefs,
+        receiver_caps,
+        proposer_label,
+        receiver_label,
+    ) = get_market_for_algorithm(
+        doctors,
+        hospitals,
+        doctor_prefs,
+        hospital_prefs,
+        capacities,
+        algorithm,
+    )
+
     s["round"] += 1
     lines = [f"Round {s['round']}"]
 
-    proposals = {h: [] for h in hospitals}
-    new_unmatched = []
+    proposals = {r: [] for r in receivers}
+    new_active = []
 
-    for d in s["unmatched"]:
-        i = s["next_choice_index"][d]
+    for p in s["active"]:
+        i = s["next_choice_index"][p]
 
-        if i < len(doctor_prefs[d]):
-            h = doctor_prefs[d][i]
-            proposals[h].append(d)
-            s["next_choice_index"][d] += 1
-            lines.append(f"{d} → {h}")
+        if i < len(proposer_prefs[p]):
+            r = proposer_prefs[p][i]
+            proposals[r].append(p)
+            s["next_choice_index"][p] += 1
+            lines.append(f"{p} → {r}")
         else:
-            lines.append(f"{d} has no acceptable hospitals left.")
+            lines.append(f"{p} has no acceptable options left.")
 
-    for h in hospitals:
-        applicants = s["held"][h] + proposals[h]
+    for r in receivers:
+        applicants = s["held_by_receiver"][r] + proposals[r]
 
         if not applicants:
             continue
 
-        acceptable_applicants = [d for d in applicants if d in hospital_prefs[h]]
-        unacceptable_applicants = [d for d in applicants if d not in hospital_prefs[h]]
+        acceptable = [p for p in applicants if p in receiver_prefs[r]]
+        unacceptable = [p for p in applicants if p not in receiver_prefs[r]]
 
-        ranked = sorted(
-            acceptable_applicants,
-            key=lambda d: hospital_rank(h, d, hospital_prefs),
-        )
+        ranked = sorted(acceptable, key=lambda p: receiver_rank(r, p, receiver_prefs))
 
-        accepted = ranked[:capacities[h]]
-        rejected = ranked[capacities[h]:] + unacceptable_applicants
+        cap = receiver_caps[r]
+        accepted = ranked[:cap]
+        rejected = ranked[cap:] + unacceptable
 
-        s["held"][h] = accepted
+        s["held_by_receiver"][r] = accepted
 
         if accepted:
-            lines.append(f"{h} holds: {', '.join(accepted)}")
+            lines.append(f"{r} holds: {', '.join(accepted)}")
         else:
-            lines.append(f"{h} holds nobody.")
+            lines.append(f"{r} holds nobody.")
 
-        for d in rejected:
-            if d in unacceptable_applicants:
-                lines.append(f"{h} rejects {d} as unacceptable.")
+        for p in rejected:
+            if p in unacceptable:
+                lines.append(f"{r} rejects {p} as unacceptable.")
             else:
-                lines.append(f"{h} rejects: {d}")
+                lines.append(f"{r} rejects: {p}")
 
-            if s["next_choice_index"][d] < len(doctor_prefs[d]):
-                new_unmatched.append(d)
+            if s["next_choice_index"][p] < len(proposer_prefs[p]):
+                new_active.append(p)
             else:
-                lines.append(f"{d} has no acceptable hospitals left.")
+                lines.append(f"{p} has no acceptable options left.")
 
-    s["unmatched"] = new_unmatched
+    s["active"] = new_active
 
-    if not s["unmatched"]:
+    if not s["active"]:
         s["done"] = True
         lines.append("Complete.")
 
@@ -164,9 +213,34 @@ def run_one_round(s, doctors, hospitals, doctor_prefs, hospital_prefs, capacitie
     return s
 
 
+def extract_doctor_hospital_matches(s, doctors, hospitals):
+    matches = []
+
+    if s["algorithm"] == "doctor":
+        for h, held_doctors in s["held_by_receiver"].items():
+            for d in held_doctors:
+                matches.append((d, h))
+    else:
+        for d, held_hospitals in s["held_by_receiver"].items():
+            for h in held_hospitals:
+                matches.append((d, h))
+
+    return matches
+
+
 app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.h3("Market Setup"),
+
+        ui.input_radio_buttons(
+            "algorithm",
+            "Algorithm",
+            {
+                "doctor": "Doctor-proposing DAA",
+                "hospital": "Hospital-proposing DAA",
+            },
+            selected="doctor",
+        ),
 
         ui.input_slider("num_doctors", "Number of doctors", 2, 10, 4),
         ui.input_slider("num_hospitals", "Number of hospitals", 1, 8, 3),
@@ -205,7 +279,7 @@ app_ui = ui.page_sidebar(
     ),
 
     ui.h2("Gale-Shapley Deferred Acceptance Visualizer"),
-    ui.p("Doctor-proposing deferred acceptance with custom preferences, capacities, and unacceptable matches."),
+    ui.p("Choose doctor-proposing or hospital-proposing deferred acceptance."),
 
     ui.h3("Input Format"),
     ui.p("Preferences: D1: H1,H2,H3"),
@@ -243,7 +317,7 @@ def server(input, output, session):
     market = reactive.Value(initial_market)
 
     doctors, hospitals, _, _, _ = initial_market
-    state = reactive.Value(initialize_state(doctors, hospitals))
+    state = reactive.Value(initialize_state(doctors, hospitals, "doctor"))
 
     @reactive.effect
     @reactive.event(input.fill_defaults)
@@ -275,29 +349,54 @@ def server(input, output, session):
         market.set(new_market)
 
         doctors, hospitals, _, _, _ = new_market
-        state.set(initialize_state(doctors, hospitals))
+        state.set(initialize_state(doctors, hospitals, input.algorithm()))
 
     @reactive.effect
     @reactive.event(input.reset)
     def _():
         doctors, hospitals, _, _, _ = market.get()
-        state.set(initialize_state(doctors, hospitals))
+        state.set(initialize_state(doctors, hospitals, input.algorithm()))
 
     @reactive.effect
     @reactive.event(input.next_round)
     def _():
         doctors, hospitals, doctor_prefs, hospital_prefs, capacities = market.get()
+
+        if state.get()["algorithm"] != input.algorithm():
+            state.set(initialize_state(doctors, hospitals, input.algorithm()))
+
         s = state.get().copy()
-        state.set(run_one_round(s, doctors, hospitals, doctor_prefs, hospital_prefs, capacities))
+
+        state.set(
+            run_one_round(
+                s,
+                doctors,
+                hospitals,
+                doctor_prefs,
+                hospital_prefs,
+                capacities,
+            )
+        )
 
     @reactive.effect
     @reactive.event(input.run_full)
     def _():
         doctors, hospitals, doctor_prefs, hospital_prefs, capacities = market.get()
+
+        if state.get()["algorithm"] != input.algorithm():
+            state.set(initialize_state(doctors, hospitals, input.algorithm()))
+
         s = state.get().copy()
 
         while not s["done"]:
-            s = run_one_round(s, doctors, hospitals, doctor_prefs, hospital_prefs, capacities)
+            s = run_one_round(
+                s,
+                doctors,
+                hospitals,
+                doctor_prefs,
+                hospital_prefs,
+                capacities,
+            )
 
         state.set(s)
 
@@ -307,6 +406,12 @@ def server(input, output, session):
         doctors, hospitals, doctor_prefs, hospital_prefs, capacities = market.get()
 
         lines = []
+        lines.append(
+            "Algorithm: "
+            + ("Doctor-proposing DAA" if input.algorithm() == "doctor" else "Hospital-proposing DAA")
+        )
+
+        lines.append("")
         lines.append(f"Doctors: {', '.join(doctors)}")
         lines.append(f"Hospitals: {', '.join(hospitals)}")
 
@@ -316,11 +421,21 @@ def server(input, output, session):
 
         lines.append("")
         lines.append("Acceptable doctor preferences:")
-        lines.extend([f"  {d}: {' > '.join(doctor_prefs[d]) if doctor_prefs[d] else 'none'}" for d in doctors])
+        lines.extend(
+            [
+                f"  {d}: {' > '.join(doctor_prefs[d]) if doctor_prefs[d] else 'none'}"
+                for d in doctors
+            ]
+        )
 
         lines.append("")
         lines.append("Acceptable hospital preferences:")
-        lines.extend([f"  {h}: {' > '.join(hospital_prefs[h]) if hospital_prefs[h] else 'none'}" for h in hospitals])
+        lines.extend(
+            [
+                f"  {h}: {' > '.join(hospital_prefs[h]) if hospital_prefs[h] else 'none'}"
+                for h in hospitals
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -335,29 +450,23 @@ def server(input, output, session):
         doctors, hospitals, _, _, _ = market.get()
         s = state.get()
 
+        matches = extract_doctor_hospital_matches(s, doctors, hospitals)
+
         lines = []
 
-        for h in hospitals:
-            if s["held"][h]:
-                for d in s["held"][h]:
-                    lines.append(f"{d} — {h}")
-            else:
-                lines.append(f"{h}: empty")
+        if matches:
+            for d, h in sorted(matches):
+                lines.append(f"{d} — {h}")
+        else:
+            lines.append("No tentative matches yet.")
+
+        matched_doctors = [d for d, h in matches]
+        unmatched_doctors = [d for d in doctors if d not in matched_doctors]
 
         lines.append("")
         lines.append(
-            "Still active/unmatched: " + (", ".join(s["unmatched"]) if s["unmatched"] else "none")
-        )
-
-        matched_doctors = [d for held in s["held"].values() for d in held]
-        permanently_unmatched = [
-            d for d in doctors
-            if d not in matched_doctors and d not in s["unmatched"]
-        ]
-
-        lines.append(
-            "Permanently unmatched: "
-            + (", ".join(permanently_unmatched) if permanently_unmatched else "none")
+            "Unmatched doctors: "
+            + (", ".join(unmatched_doctors) if unmatched_doctors else "none")
         )
 
         return "\n".join(lines)
