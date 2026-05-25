@@ -1,0 +1,30 @@
+# Gale–Shapley Deferred Acceptance Visualizer
+
+Interactive Shiny for Python web app implementing the doctor-proposing Deferred Acceptance Algorithm.
+
+## Features
+
+- User-defined numbers of doctors and hospitals
+- Custom preference profiles
+- Hospital-specific capacities
+- Unacceptable matches
+- Step-by-step execution
+- Full algorithm log
+
+## Live Demo
+
+[Open App](YOUR_GITHUB_PAGES_LINK)
+
+## Built With
+
+- Python
+- Shiny for Python
+- Shinylive
+- GitHub Pages
+
+## Run Locally
+
+```bash
+pip install shiny shinylive
+python -m shiny run --reload app.py
+```
