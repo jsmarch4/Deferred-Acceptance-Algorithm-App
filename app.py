@@ -1,6 +1,10 @@
 from shiny import App, ui, render, reactive
 
 
+# -----------------------------
+# Parsing helpers
+# -----------------------------
+
 def parse_preferences(text, agents, choices):
     prefs = {}
 
@@ -67,6 +71,10 @@ def default_capacity_text(num_hospitals):
     return "\n".join([f"H{i}: 1" for i in range(1, num_hospitals + 1)])
 
 
+# -----------------------------
+# Market helpers
+# -----------------------------
+
 def make_market(num_doctors, num_hospitals, capacity_text, doctor_pref_text, hospital_pref_text):
     doctors = [f"D{i}" for i in range(1, num_doctors + 1)]
     hospitals = [f"H{i}" for i in range(1, num_hospitals + 1)]
@@ -82,13 +90,9 @@ def initialize_state(doctors, hospitals, algorithm):
     if algorithm == "doctor":
         proposers = doctors.copy()
         receivers = hospitals.copy()
-        proposer_caps = {d: 1 for d in doctors}
-        receiver_caps = {h: None for h in hospitals}
     else:
         proposers = hospitals.copy()
         receivers = doctors.copy()
-        proposer_caps = {h: None for h in hospitals}
-        receiver_caps = {d: 1 for d in doctors}
 
     return {
         "round": 0,
@@ -109,18 +113,14 @@ def get_market_for_algorithm(doctors, hospitals, doctor_prefs, hospital_prefs, c
         proposer_prefs = doctor_prefs
         receiver_prefs = hospital_prefs
         receiver_caps = capacities
-        proposer_label = "Doctor"
-        receiver_label = "Hospital"
     else:
         proposers = hospitals
         receivers = doctors
         proposer_prefs = hospital_prefs
         receiver_prefs = doctor_prefs
         receiver_caps = {d: 1 for d in doctors}
-        proposer_label = "Hospital"
-        receiver_label = "Doctor"
 
-    return proposers, receivers, proposer_prefs, receiver_prefs, receiver_caps, proposer_label, receiver_label
+    return proposers, receivers, proposer_prefs, receiver_prefs, receiver_caps
 
 
 def receiver_rank(receiver, proposer, receiver_prefs):
@@ -134,15 +134,7 @@ def run_one_round(s, doctors, hospitals, doctor_prefs, hospital_prefs, capacitie
 
     algorithm = s["algorithm"]
 
-    (
-        proposers,
-        receivers,
-        proposer_prefs,
-        receiver_prefs,
-        receiver_caps,
-        proposer_label,
-        receiver_label,
-    ) = get_market_for_algorithm(
+    proposers, receivers, proposer_prefs, receiver_prefs, receiver_caps = get_market_for_algorithm(
         doctors,
         hospitals,
         doctor_prefs,
@@ -213,7 +205,7 @@ def run_one_round(s, doctors, hospitals, doctor_prefs, hospital_prefs, capacitie
     return s
 
 
-def extract_doctor_hospital_matches(s, doctors, hospitals):
+def extract_doctor_hospital_matches(s):
     matches = []
 
     if s["algorithm"] == "doctor":
@@ -228,18 +220,40 @@ def extract_doctor_hospital_matches(s, doctors, hospitals):
     return matches
 
 
+# -----------------------------
+# UI
+# -----------------------------
+
 app_ui = ui.page_sidebar(
     ui.sidebar(
+        ui.tags.style("""
+        .radio label {
+            white-space: nowrap;
+        }
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        .sidebar .form-group label {
+            margin-bottom: 8px;
+        }
+        """),
+
         ui.h3("Market Setup"),
 
-        ui.input_radio_buttons(
-            "algorithm",
-            "Algorithm",
-            {
-                "doctor": "Doctor-proposing DAA",
-                "hospital": "Hospital-proposing DAA",
-            },
-            selected="doctor",
+        ui.div(
+            {"style": "margin-bottom: 24px;"},
+            ui.input_radio_buttons(
+                "algorithm",
+                "Algorithm",
+                {
+                    "doctor": "Doctor-proposing DAA",
+                    "hospital": "Hospital-proposing DAA",
+                },
+                selected="doctor",
+                width="100%",
+            ),
         ),
 
         ui.input_slider("num_doctors", "Number of doctors", 2, 10, 4),
@@ -300,6 +314,10 @@ app_ui = ui.page_sidebar(
     ui.output_text_verbatim("log_text"),
 )
 
+
+# -----------------------------
+# Server
+# -----------------------------
 
 def server(input, output, session):
     initial_doctor_text = default_doctor_pref_text(4, 3)
@@ -450,7 +468,7 @@ def server(input, output, session):
         doctors, hospitals, _, _, _ = market.get()
         s = state.get()
 
-        matches = extract_doctor_hospital_matches(s, doctors, hospitals)
+        matches = extract_doctor_hospital_matches(s)
 
         lines = []
 
