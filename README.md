@@ -1,6 +1,6 @@
-# Gale–Shapley Deferred Acceptance Visualizer
+# Gale–Shapley Deferred Acceptance Algorithm Visualizer
 
-Interactive Shiny for Python web app implementing the doctor-proposing Deferred Acceptance Algorithm.
+Interactive Shiny for Python web app implementing both the doctor-proposing and hospital-proposing Deferred Acceptance Algorithm.
 
 ## Features
 
