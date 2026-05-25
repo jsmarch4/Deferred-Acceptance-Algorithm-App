@@ -28,3 +28,4 @@ Interactive Shiny for Python web app implementing both the doctor-proposing and 
 pip install shiny shinylive
 python -m shiny run --reload app.py
 ```
+<img width="1512" height="823" alt="image" src="https://github.com/user-attachments/assets/32e133d4-e090-4c3d-85fc-f215108a0481" />
